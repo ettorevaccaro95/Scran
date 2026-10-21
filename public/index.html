@@ -567,12 +567,89 @@ function errCopy(code){return {not_granted:'Claude wasn\'t allowed, so these are
 
 function fillGaps(){libFill(S.plan,S.nights);S.plan=S.plan.slice(0,S.nights);
   if(S.lunchOn){S.lunches=S.lunches.slice(0,S.lunchDays);lunchFill(S.lunches,S.lunchDays)}else S.lunches=[]}
+/* On a website the AI runs behind a 30-second limit, so plan in two steps:
+   one quick call picks the week's meals, then small calls write the recipes side by side. */
+let OUT={d:[],l:[]};
+function outlinePrompt(){const L=S.lunchOn?S.lunchDays:0;return `You plan a week of meals for a UK household on a budget. First, just the outline of the week.
+${briefText()}
+Dinners needed: ${S.nights}, for ${S.people}. Meal mix for the dinners: ${mixText(mix(S.nights))}. Stick to this mix. Do not swap meat or fish dinners for vegetarian ones just to save money.
+${L?`Lunches needed: ${L} (${DAYNAMES.slice(0,L).join(', ')}), for ${S.lunchPeople}. Quick (15 minutes or less) or easy to pack for work. Lunch mix: ${mixText(lunchMix(L))}.${S.leftovers?' On up to 2 days, lunch can be leftovers of the previous evening\'s dinner if that dinner keeps well (a pasta bake, chilli, stew, pie). Mark those with "leftover":true.':''}`:'No lunches needed.'}
+Total food budget for everything: £${S.budget}.
+
+Ingredients available (id | name | pack | price at this shop | unit):
+${catalogue()}
+
+Pick meals that can be made from these ingredients, share ingredients across the week so packs get used up, use what's already in their kitchen, and vary proteins and cuisines (British, Italian, Mexican, Chinese, Spanish and so on, never Indian). No meal twice. Realistic home cooking.
+
+Reply with exactly ${S.nights+L} lines, one JSON object per line and nothing else: the dinners in order from day 1 (Monday)${L?', then the lunches in order from day 1':''}. Example lines:
+{"slot":"dinner","day":1,"name":"Lemon and garlic chicken thighs","kind":"meat"}
+${L?'{"slot":"lunch","day":1,"name":"Tuna pasta salad","kind":"fish"}\n{"slot":"lunch","day":2,"leftover":true}':''}`}
+function outlineText(){const L=S.lunchOn?S.lunchDays:0;const out=[];
+  for(let i=0;i<S.nights;i++)out.push(`${DAYNAMES[i]} dinner: ${OUT.d[i]||'?'}`);
+  for(let i=0;i<L;i++){const l=S.lunches[i];out.push(`${DAYNAMES[i]} lunch: ${l&&l.left!=null?'leftovers of '+DAYNAMES[l.left]+'\'s dinner':(OUT.l[i]||'?')}`)}
+  return out.join('\n')}
+function recipePrompt(items){return `You plan a week of meals for a UK household on a budget. Now write full recipes for some of the meals.
+${briefText()}
+The whole week, so you can share ingredients sensibly:
+${outlineText()}
+
+Write recipes for ONLY these meals, in this order:
+${items.map(x=>`- ${DAYNAMES[x.i]} ${x.slot}: ${x.name}`).join('\n')}
+
+Use ONLY ingredients from this catalogue. Format: id | name | pack | price per pack at this shop | unit for quantities. Salt, pepper and water are free and need no id.
+${catalogue()}
+
+Rules:
+- Quantities are PER PERSON in the unit shown (grams, ml, or a count; tins can be fractions like 0.5).
+- ${kcalRule()} Calories are worked out from your quantities, so make the quantities accurate.
+- Follow the diet and avoid list strictly. Never Indian food.
+- Lunches: 15 minutes or less, or easy to pack.
+- Each meal: 3 to 6 clear method steps in UK English. Oven temperatures as "200°C (180°C fan)". Total time in minutes.
+
+Reply with exactly ${items.length} lines, one JSON object per line and nothing else, in the order above. Example line:
+${FORMAT}`}
+function jsonLines(t){return t.split('\n').map(x=>x.trim()).filter(x=>x.startsWith('{')).map(x=>{try{return JSON.parse(x)}catch(e){return null}}).filter(Boolean)}
+async function planStaged(ai,ctl){
+  const L=S.lunchOn?S.lunchDays:0;OUT={d:[],l:[]};
+  let txt;try{txt=await ai.text(outlinePrompt(),{kind:'plan',signal:ctl.signal})}
+  catch(e){OUT={d:[],l:[]};if(e&&e.code!=='cancelled')toast(errCopy(e&&e.code));fillGaps();S.src='lib';return}
+  let dn=0,ln=0;
+  jsonLines(txt).forEach(o=>{
+    const isL=o.slot==='lunch';
+    if(!isL&&dn<S.nights&&o.name){OUT.d[dn++]=String(o.name).slice(0,70)}
+    else if(isL&&ln<L){
+      if(o.leftover&&S.leftovers&&ln>0&&!S.lunches.some(l=>l&&l.left===ln-1)){S.lunches[ln]={left:ln-1};ln++}
+      else if(o.name){OUT.l[ln++]=String(o.name).slice(0,70)}}});
+  OUT.d=OUT.d.map(n=>n&&isIndian({n})?null:n);OUT.l=OUT.l.map(n=>n&&isIndian({n})?null:n);
+  render();
+  const jobs=[];const dItems=OUT.d.map((name,i)=>name&&{slot:'dinner',i,name}).filter(Boolean);
+  const lItems=OUT.l.map((name,i)=>name&&!S.lunches[i]&&{slot:'lunch',i,name}).filter(Boolean);
+  for(let k=0;k<dItems.length;k+=2)jobs.push(dItems.slice(k,k+2));
+  for(let k=0;k<lItems.length;k+=3)jobs.push(lItems.slice(k,k+3));
+  let failed=0,lastErr=null;
+  await Promise.all(jobs.map(async items=>{
+    try{const t=await ai.text(recipePrompt(items),{kind:'plan',signal:ctl.signal});
+      const got=jsonLines(t);
+      items.forEach((x,j)=>{const m=clean(got[j],x.slot==='lunch');if(!m){failed++;return}
+        if(x.slot==='dinner')S.plan[x.i]=m;else S.lunches[x.i]=m});
+      render()}
+    catch(e){failed+=items.length;lastErr=e}}));
+  if(lastErr&&lastErr.code==='cancelled'){OUT={d:[],l:[]};fillGaps();S.src=S.plan.some(m=>m&&m.src==='ai')?'ai':'lib';return}
+  OUT={d:[],l:[]};
+  const any=S.plan.some(m=>m&&m.src==='ai');
+  for(let i=0;i<S.nights;i++)if(!S.plan[i])S.plan[i]=undefined;
+  S.lunches=S.lunches.map(l=>l&&l.left!=null&&!S.plan[l.left]?null:l);
+  fillGaps();S.src=any?'ai':'lib';
+  if(failed&&any)toast('Topped up with a couple of Scran recipes');else if(!any)toast(errCopy(lastErr&&lastErr.code))
+}
+
 async function generate(){
   if(busy)return;
   S.plan=[];S.lunches=[];S.checked={};S.src='';save();
   const ctl=new AbortController();busy={ctl,swapping:null};render();
   const ai=await aiP;
   if(!ai){fillGaps();S.src='lib';finish();return}
+  if(aiVia==='site'){await planStaged(ai,ctl);finish();return}
   const L=S.lunchOn?S.lunchDays:0;let pending='',dn=0,ln=0,lines=0;
   const eat=line=>{line=line.trim();if(!line)return;let o;try{o=JSON.parse(line)}catch(e){return}lines++;
     const isL=o.slot==='lunch'||(o.slot!=='dinner'&&lines>S.nights);
@@ -720,7 +797,7 @@ function calCard(){
   </div><p class="hint">Per person. The NHS guide for a whole day is about 2,000 kcal for women and 2,500 for men. Figures are estimates from standard nutrition values.</p></section>`}
 function row(kind,i,m,label){
   const id=kind+i,sw=busy&&busy.swapping===id;
-  if(!m)return `<div class="day pending"><span class="d">${DAYS[i]}</span><span class="open"><span class="skel"></span><span class="rmeta">${busy&&!busy.swapping?'Writing recipe…':''}</span></span><span></span><span></span></div>`;
+  if(!m){const nm=(OUT[kind]||[])[i];return `<div class="day pending"><span class="d">${DAYS[i]}</span><span class="open">${nm?`<span class="rname">${esc(nm)}</span>`:'<span class="skel"></span>'}<span class="rmeta">${busy&&!busy.swapping?(nm?'Writing the recipe…':'Picking meals…'):''}</span></span><span></span><span></span></div>`}
   const left=label!=null;
   return `<div class="day"><span class="d">${DAYS[i]}</span>
     <button class="open" type="button" data-open="${id}"><span class="rname">${left?'Leftover '+esc(m.n.charAt(0).toLowerCase()+m.n.slice(1)):esc(m.n)}</span><span class="rmeta num">${left?'From '+label+'\'s dinner · ':m.m+' min · '}${fmtK(kcalOf(m))} kcal${m.hot?' · Spicy':''}</span></button>
