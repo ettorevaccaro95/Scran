@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Plan a week of budget meals with real UK supermarket prices, calories and a shopping list.">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1C5A3C">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Scran">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Scran</title>
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.4 system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -946,6 +954,27 @@ if(S.plan.some(m=>isIndian(m)||!m.k)){S.plan=[];S.lunches=[];S.checked={}}
 if(S.done&&(!S.plan.length||(S.lunchOn&&S.lunches.slice(0,S.lunchDays).filter(Boolean).length<S.lunchDays))){fillGaps();if(!S.src)S.src='lib';save()}
 render();
 
+</script>
+<script>
+/* Website only: offline support and an "Add Scran to your home screen" card on the You tab */
+if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('/sw.js').catch(()=>{});
+let installEvt=null;
+const standalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;if(S.done&&S.tab==='you')render()});
+addEventListener('appinstalled',()=>{installEvt=null;toast('Scran is on your home screen');if(S.done)render()});
+function installCard(){
+  if(standalone())return '';
+  const ua=navigator.userAgent,ios=/iPhone|iPad|iPod/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);
+  const inApp=/FBAN|FBAV|Instagram|Line\/|WhatsApp|GSA\/|Snapchat|TikTok/.test(ua);
+  let how;
+  if(installEvt)how='<button class="btn full" id="installBtn" type="button">Add Scran to home screen</button>';
+  else if(inApp)how='<p class="hint">You\'re in another app\'s browser, which can\'t add to your home screen. Open scran-meals.netlify.app in '+(ios?'Safari':'Chrome')+' first, then come back here.</p>';
+  else if(ios)how='<p class="hint">In Safari, tap the <b>Share</b> button (the square with an arrow), scroll down and tap <b>Add to Home Screen</b>. In Chrome on iPhone, tap <b>Share</b> in the address bar, then <b>Add to Home Screen</b>.</p>';
+  else how='<p class="hint">In Chrome, tap the <b>⋮</b> menu, then <b>Add to Home screen</b> or <b>Install app</b>. In Samsung Internet, tap the menu, then <b>Add page to</b> › <b>Home screen</b>.</p>';
+  return '<h2>Put Scran on your phone</h2><div class="panel">'+how+'</div>'}
+const _youView=youView;youView=function(){return _youView()+installCard()};
+document.addEventListener('click',async e=>{if(e.target.id!=='installBtn'||!installEvt)return;installEvt.prompt();try{await installEvt.userChoice}catch(_){}installEvt=null;render()});
+if(S.done&&S.tab==='you')render();
 </script>
 </body>
 </html>
