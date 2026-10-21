@@ -26,7 +26,7 @@ export default async (req, context) => {
   if (req.method !== "POST") return new Response("Use POST", { status: 405 });
 
   const key = env("ANTHROPIC_API_KEY");
-  if (!key) return new Response("ANTHROPIC_API_KEY is not set", { status: 503 });
+  if (!key) return new Response("No Claude key: turn on Netlify AI features or set ANTHROPIC_API_KEY", { status: 503 });
 
   let body;
   try { body = await req.json(); } catch { return new Response("Bad request", { status: 400 }); }
@@ -38,7 +38,10 @@ export default async (req, context) => {
   const perHour = Number(env("PLANS_PER_HOUR") || 20);
   if (!allowed(context?.ip || "unknown", perHour)) return new Response("Too many requests", { status: 429 });
 
-  const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+  // On Netlify, the AI Gateway sets ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL for you (billed as Netlify credits).
+  // If you add your own ANTHROPIC_API_KEY instead, Netlify leaves it alone and this calls Claude directly.
+  const base = (env("ANTHROPIC_BASE_URL") || "https://api.anthropic.com").replace(/\/+$/, "");
+  const upstream = await fetch(`${base}/v1/messages`, {
     method: "POST",
     headers: {
       "x-api-key": key,
