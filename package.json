@@ -1,0 +1,6 @@
+{
+  "name": "scran",
+  "private": true,
+  "type": "module",
+  "description": "Scran: UK budget meal planner with an AI planning function"
+}
