@@ -604,7 +604,8 @@ Rules:
 - ${kcalRule()} Calories are worked out from your quantities, so make the quantities accurate.
 - Follow the diet and avoid list strictly. Never Indian food.
 - Lunches: 15 minutes or less, or easy to pack.
-- Each meal: 3 to 6 clear method steps in UK English. Oven temperatures as "200°C (180°C fan)". Total time in minutes.
+- Each meal: 3 to 5 clear method steps in UK English, one or two short sentences each. Oven temperatures as "200°C (180°C fan)". Total time in minutes.
+- Leave out the note unless it says which other meal shares an ingredient.
 
 Reply with exactly ${items.length} lines, one JSON object per line and nothing else, in the order above. Example line:
 ${FORMAT}`}
@@ -627,13 +628,17 @@ async function planStaged(ai,ctl){
   /* one recipe per call: each takes around 15 seconds, and the server stops at 30 */
   dItems.concat(lItems).forEach(x=>jobs.push([x]));
   let failed=0,lastErr=null;
+  /* each recipe gets a second try if the first one fails or comes back unusable */
   await Promise.all(jobs.map(async items=>{
-    try{const t=await ai.text(recipePrompt(items),{kind:'plan',signal:ctl.signal});
-      const got=jsonLines(t);
-      items.forEach((x,j)=>{const m=clean(got[j],x.slot==='lunch');if(!m){failed++;return}
-        if(x.slot==='dinner')S.plan[x.i]=m;else S.lunches[x.i]=m});
-      render()}
-    catch(e){failed+=items.length;lastErr=e}}));
+    for(let attempt=0;attempt<2;attempt++){
+      try{const t=await ai.text(recipePrompt(items),{kind:'plan',signal:ctl.signal});
+        const got=jsonLines(t);let ok=true;
+        items.forEach((x,j)=>{const m=clean(got[j],x.slot==='lunch');if(!m){ok=false;return}
+          if(x.slot==='dinner')S.plan[x.i]=m;else S.lunches[x.i]=m});
+        render();if(ok)return}
+      catch(e){lastErr=e;if(e&&e.code==='cancelled')return}
+    }
+    failed+=items.length}));
   if(lastErr&&lastErr.code==='cancelled'){OUT={d:[],l:[]};fillGaps();S.src=S.plan.some(m=>m&&m.src==='ai')?'ai':'lib';return}
   OUT={d:[],l:[]};
   const any=S.plan.some(m=>m&&m.src==='ai');
