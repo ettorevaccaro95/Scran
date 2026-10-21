@@ -5,7 +5,7 @@ const PREFIX = {
   plan: "You plan a week of meals for a UK household on a budget.",
   swap: "You suggest ONE replacement evening meal for a UK household on a budget.",
 };
-const MAX_TOKENS = { plan: 8000, swap: 1500 };
+const MAX_TOKENS = { plan: 4000, swap: 1500 };
 const MAX_PROMPT_CHARS = 20000;
 
 // Very simple per-visitor limit. It resets when Netlify starts a fresh copy of the function,
