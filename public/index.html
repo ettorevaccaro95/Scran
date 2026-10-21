@@ -624,8 +624,8 @@ async function planStaged(ai,ctl){
   render();
   const jobs=[];const dItems=OUT.d.map((name,i)=>name&&{slot:'dinner',i,name}).filter(Boolean);
   const lItems=OUT.l.map((name,i)=>name&&!S.lunches[i]&&{slot:'lunch',i,name}).filter(Boolean);
-  for(let k=0;k<dItems.length;k+=2)jobs.push(dItems.slice(k,k+2));
-  for(let k=0;k<lItems.length;k+=3)jobs.push(lItems.slice(k,k+3));
+  /* one recipe per call: each takes around 15 seconds, and the server stops at 30 */
+  dItems.concat(lItems).forEach(x=>jobs.push([x]));
   let failed=0,lastErr=null;
   await Promise.all(jobs.map(async items=>{
     try{const t=await ai.text(recipePrompt(items),{kind:'plan',signal:ctl.signal});
